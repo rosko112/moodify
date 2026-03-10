@@ -1,0 +1,63 @@
+@import "tailwindcss";
+
+:root {
+  --background: #f6fff9;
+  --foreground: #0b1f16;
+  --ink-soft: #1a3b2a;
+  --emerald: #1fa971;
+  --emerald-dark: #137753;
+  --surface: #ffffff;
+  --surface-strong: #eef8f1;
+  --line: rgba(9, 28, 20, 0.14);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-manrope);
+  --font-display: var(--font-bricolage);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #060b09;
+    --foreground: #eef5ef;
+    --ink-soft: #cfe6d7;
+    --surface: #0f1b15;
+    --surface-strong: #111f18;
+    --line: rgba(232, 246, 236, 0.16);
+  }
+}
+
+body {
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-manrope), "Segoe UI", sans-serif;
+}
+
+.font-display {
+  font-family: var(--font-bricolage), var(--font-manrope), "Segoe UI", sans-serif;
+}
+
+.bg-mist {
+  background-image: radial-gradient(
+      circle at 18% 14%,
+      rgba(31, 169, 113, 0.22),
+      transparent 48%
+    ),
+    radial-gradient(
+      circle at 80% 84%,
+      rgba(31, 169, 113, 0.18),
+      transparent 52%
+    );
+}
+
+.bg-grid {
+  background-image: linear-gradient(
+      to right,
+      rgba(9, 28, 20, 0.06) 1px,
+      transparent 1px
+    ),
+    linear-gradient(to bottom, rgba(9, 28, 20, 0.06) 1px, transparent 1px);
+  background-size: 36px 36px;
+}
