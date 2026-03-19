@@ -90,7 +90,7 @@ export default function Home() {
               </p>
               <Link
                 href="/login"
-                className="mt-6 inline-flex h-11 items-center justify-center rounded-2xlbg-[color:var(--emerald)] px-6 text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-[color:var(--emerald-dark)]"
+                className="mt-6 inline-flex h-11 items-center justify-center rounded-2xl bg-[color:var(--foreground)] px-6 text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-[color:var(--emerald-dark)]"
               >
                 Go to login
               </Link>
