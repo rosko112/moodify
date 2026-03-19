@@ -1,6 +1,7 @@
 import { createHmac } from "crypto";
 import { cookies } from "next/headers";
 
+
 const SESSION_COOKIE = "moodify_session";
 
 export type SessionPayload = {
@@ -73,3 +74,5 @@ export async function getSession(): Promise<SessionPayload | null> {
     return null;
   }
 }
+
+

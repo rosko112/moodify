@@ -2,35 +2,75 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { createSessionCookie } from "@/lib/auth";
 import { loginUser } from "@/lib/users";
+import { LoginSubmitButton } from "./submit-button";
 
-type LoginPageProps = {
-  searchParams?: {
-    error?: string;
+type LoginState = {
+  error?: string;
+  fieldErrors?: {
+    email?: string;
+    password?: string;
   };
 };
 
-async function login(formData: FormData) {
+const initialState: LoginState = {};
+
+async function loginAction(
+  _prevState: LoginState,
+  formData: FormData
+): Promise<LoginState> {
   "use server";
 
-  const email = String(formData.get("email") || "").trim();
+  const email = String(formData.get("email") || "").trim().toLowerCase();
   const password = String(formData.get("password") || "");
 
-  if (!email || !password) {
-    redirect("/login?error=Missing+credentials");
+  const fieldErrors: LoginState["fieldErrors"] = {};
+
+  if (!email) {
+    fieldErrors.email = "Email is required.";
+  } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    fieldErrors.email = "Enter a valid email address.";
   }
 
-  const user = await loginUser(email, password);
-  if (!user) {
-    redirect("/login?error=Invalid+email+or+password");
+  if (!password) {
+    fieldErrors.password = "Password is required.";
+  } else if (password.length < 6) {
+    fieldErrors.password = "Password must be at least 6 characters.";
   }
 
-  await createSessionCookie({ id: user.id, name: user.username, emoji: "🌿" });
+  if (fieldErrors.email || fieldErrors.password) {
+    return {
+      error: "Please fix the highlighted fields.",
+      fieldErrors,
+    };
+  }
+
+  try {
+    const user = await loginUser(email, password);
+
+    if (!user) {
+      return {
+        error: "Invalid email or password.",
+      };
+    }
+
+    await createSessionCookie({
+      id: user.id,
+      name: user.username,
+      emoji: "🌿",
+    });
+  } catch (error) {
+    console.error("Login failed:", error);
+    return {
+      error: "Something went wrong while signing you in. Please try again.",
+    };
+  }
+
   redirect("/mood");
 }
 
-export default function LoginPage({ searchParams }: LoginPageProps) {
-  const error = searchParams?.error;
+import { LoginForm } from "./login-form";
 
+export default function LoginPage() {
   return (
     <div className="relative min-h-screen overflow-hidden bg-[color:var(--background)] text-[color:var(--foreground)]">
       <div className="absolute inset-0 bg-mist" aria-hidden="true" />
@@ -55,50 +95,9 @@ export default function LoginPage({ searchParams }: LoginPageProps) {
           <p className="mt-2 text-sm text-[color:var(--ink-soft)]">
             Pick up where you left off.
           </p>
-          <form action={login} className="mt-8 grid gap-4">
-            <div className="grid gap-2">
-              <label
-                htmlFor="login-email"
-                className="text-xs font-semibold uppercase tracking-[0.2em]"
-              >
-                Email
-              </label>
-              <input
-                id="login-email"
-                name="email"
-                className="h-11 rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface)] px-4 text-sm outline-none transition focus:border-[color:var(--emerald)] focus:ring-2 focus:ring-[color:var(--emerald)]/25"
-                type="email"
-                placeholder="you@moodify.app"
-                autoComplete="email"
-                required
-              />
-            </div>
-            <div className="grid gap-2">
-              <label
-                htmlFor="login-password"
-                className="text-xs font-semibold uppercase tracking-[0.2em]"
-              >
-                Password
-              </label>
-              <input
-                id="login-password"
-                name="password"
-                className="h-11 rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface)] px-4 text-sm outline-none transition focus:border-[color:var(--emerald)] focus:ring-2 focus:ring-[color:var(--emerald)]/25"
-                type="password"
-                placeholder="Your secret"
-                autoComplete="current-password"
-                required
-              />
-            </div>
-            <button className="h-11 rounded-2xl bg-[color:var(--emerald)] text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-[color:var(--emerald-dark)]">
-              Sign in
-            </button>
-          </form>
-          {error ? (
-            <p className="mt-4 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-              {error}
-            </p>
-          ) : null}
+
+          <LoginForm action={loginAction} />
+
           <p className="mt-6 text-sm text-[color:var(--ink-soft)]">
             New here?{" "}
             <Link
