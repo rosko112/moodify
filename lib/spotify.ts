@@ -3,8 +3,14 @@ import { cookies } from "next/headers";
 
 const SPOTIFY_AUTH_URL = "https://accounts.spotify.com/authorize";
 const SPOTIFY_TOKEN_URL = "https://accounts.spotify.com/api/token";
+
 const SPOTIFY_STATE_COOKIE = "spotify_oauth_state";
 const SPOTIFY_TOKENS_COOKIE = "spotify_tokens";
+
+const SPOTIFY_STATE_TTL_MS = 10 * 60 * 1000;
+const SPOTIFY_TOKENS_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+const SPOTIFY_ACCESS_TOKEN_REFRESH_BUFFER_MS = 15_000;
+
 const DEFAULT_SPOTIFY_SCOPES = ["user-read-email", "user-read-private"];
 
 export type SpotifyTokens = {
@@ -15,51 +21,71 @@ export type SpotifyTokens = {
   refresh_token?: string;
 };
 
-function getAuthSecret() {
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) {
-    throw new Error("AUTH_SECRET is not set");
+type SpotifyTokenResponse = {
+  access_token: string;
+  token_type: string;
+  scope?: string;
+  expires_in: number;
+  refresh_token?: string;
+};
+
+export type SpotifyProfile = {
+  id: string;
+  display_name: string | null;
+  email?: string;
+  country?: string;
+  product?: string;
+  images?: Array<{
+    url: string;
+    height: number | null;
+    width: number | null;
+  }>;
+};
+
+function getRequiredEnv(name: string) {
+  const value = process.env[name];
+  if (!value) {
+    throw new Error(`${name} is not set`);
   }
-  return secret;
+  return value;
+}
+
+function getAuthSecret() {
+  return getRequiredEnv("AUTH_SECRET");
+}
+
+function getSpotifyConfig() {
+  return {
+    clientId: getRequiredEnv("SPOTIFY_CLIENT_ID"),
+    clientSecret: getRequiredEnv("SPOTIFY_CLIENT_SECRET"),
+    redirectUri: getRequiredEnv("SPOTIFY_REDIRECT_URI"),
+  };
 }
 
 function signPayload(data: string) {
   return createHmac("sha256", getAuthSecret()).update(data).digest("base64url");
 }
 
-function getSpotifyConfig() {
-  const clientId = process.env.SPOTIFY_CLIENT_ID;
-  const clientSecret = process.env.SPOTIFY_CLIENT_SECRET;
-  const redirectUri = process.env.SPOTIFY_REDIRECT_URI;
-
-  if (!clientId || !clientSecret || !redirectUri) {
-    throw new Error(
-      "Spotify env vars missing: SPOTIFY_CLIENT_ID, SPOTIFY_CLIENT_SECRET, SPOTIFY_REDIRECT_URI"
-    );
-  }
-
-  return { clientId, clientSecret, redirectUri };
-}
-
-function encodeTokenCookie(tokens: SpotifyTokens) {
-  const data = Buffer.from(JSON.stringify(tokens)).toString("base64url");
+function encodeSignedValue(value: unknown) {
+  const data = Buffer.from(JSON.stringify(value)).toString("base64url");
   const signature = signPayload(data);
   return `${data}.${signature}`;
 }
 
-function decodeTokenCookie(value: string): SpotifyTokens | null {
+function decodeSignedValue<T>(value: string): T | null {
   const [data, signature] = value.split(".");
   if (!data || !signature) {
     return null;
   }
 
-  if (signPayload(data) !== signature) {
+  const expectedSignature = signPayload(data);
+  if (signature !== expectedSignature) {
     return null;
   }
 
   try {
     const decoded = Buffer.from(data, "base64url").toString("utf-8");
-    return JSON.parse(decoded) as SpotifyTokens;
+    return JSON.parse(decoded) as T;
   } catch {
     return null;
   }
@@ -74,10 +100,37 @@ function getCookieOptions() {
   };
 }
 
+function isValidSpotifyTokens(value: unknown): value is SpotifyTokens {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const tokens = value as Partial<SpotifyTokens>;
+
+  return (
+    typeof tokens.access_token === "string" &&
+    typeof tokens.token_type === "string" &&
+    typeof tokens.expires_at === "number" &&
+    (tokens.scope === undefined || typeof tokens.scope === "string") &&
+    (tokens.refresh_token === undefined || typeof tokens.refresh_token === "string")
+  );
+}
+
+function getBasicAuthHeader(clientId: string, clientSecret: string) {
+  return `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`;
+}
+
+async function parseSpotifyError(response: Response) {
+  const text = await response.text();
+  return `Spotify request failed: ${response.status} ${text}`;
+}
+
 export function buildSpotifyAuthUrl(scopes?: string[]) {
   const { clientId, redirectUri } = getSpotifyConfig();
+
   const state = randomBytes(16).toString("hex");
-  const resolvedScopes = scopes && scopes.length > 0 ? scopes : DEFAULT_SPOTIFY_SCOPES;
+  const resolvedScopes =
+    scopes && scopes.length > 0 ? scopes : DEFAULT_SPOTIFY_SCOPES;
 
   const params = new URLSearchParams({
     response_type: "code",
@@ -97,47 +150,65 @@ export function buildSpotifyAuthUrl(scopes?: string[]) {
 }
 
 export async function setSpotifyState(state: string) {
-  (await cookies()).set(SPOTIFY_STATE_COOKIE, state, {
+  const cookieStore = await cookies();
+
+  cookieStore.set(SPOTIFY_STATE_COOKIE, state, {
     ...getCookieOptions(),
-    expires: new Date(Date.now() + 10 * 60 * 1000),
+    expires: new Date(Date.now() + SPOTIFY_STATE_TTL_MS),
   });
 }
 
 export async function readSpotifyState() {
-  return (await cookies()).get(SPOTIFY_STATE_COOKIE)?.value ?? null;
+  const cookieStore = await cookies();
+  return cookieStore.get(SPOTIFY_STATE_COOKIE)?.value ?? null;
 }
 
 export async function clearSpotifyState() {
-  (await cookies()).set(SPOTIFY_STATE_COOKIE, "", {
+  const cookieStore = await cookies();
+
+  cookieStore.set(SPOTIFY_STATE_COOKIE, "", {
     ...getCookieOptions(),
     expires: new Date(0),
   });
 }
 
 export async function setSpotifyTokens(tokens: SpotifyTokens) {
-  (await cookies()).set(SPOTIFY_TOKENS_COOKIE, encodeTokenCookie(tokens), {
+  const cookieStore = await cookies();
+
+  cookieStore.set(SPOTIFY_TOKENS_COOKIE, encodeSignedValue(tokens), {
     ...getCookieOptions(),
+    maxAge: SPOTIFY_TOKENS_MAX_AGE_SECONDS,
   });
 }
 
 export async function clearSpotifyTokens() {
-  (await cookies()).set(SPOTIFY_TOKENS_COOKIE, "", {
+  const cookieStore = await cookies();
+
+  cookieStore.set(SPOTIFY_TOKENS_COOKIE, "", {
     ...getCookieOptions(),
     expires: new Date(0),
   });
 }
 
 export async function getSpotifyTokens() {
-  const value = (await cookies()).get(SPOTIFY_TOKENS_COOKIE)?.value;
-  if (!value) {
+  const cookieStore = await cookies();
+  const rawValue = cookieStore.get(SPOTIFY_TOKENS_COOKIE)?.value;
+
+  if (!rawValue) {
     return null;
   }
 
-  return decodeTokenCookie(value);
+  const decoded = decodeSignedValue<unknown>(rawValue);
+  if (!isValidSpotifyTokens(decoded)) {
+    return null;
+  }
+
+  return decoded;
 }
 
-async function refreshSpotifyToken(refreshToken: string) {
+async function refreshSpotifyToken(refreshToken: string): Promise<SpotifyTokenResponse> {
   const { clientId, clientSecret } = getSpotifyConfig();
+
   const body = new URLSearchParams({
     grant_type: "refresh_token",
     refresh_token: refreshToken,
@@ -146,9 +217,7 @@ async function refreshSpotifyToken(refreshToken: string) {
   const response = await fetch(SPOTIFY_TOKEN_URL, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString(
-        "base64"
-      )}`,
+      Authorization: getBasicAuthHeader(clientId, clientSecret),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: body.toString(),
@@ -156,21 +225,15 @@ async function refreshSpotifyToken(refreshToken: string) {
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Spotify token refresh failed: ${response.status} ${error}`);
+    throw new Error(await parseSpotifyError(response));
   }
 
-  return (await response.json()) as {
-    access_token: string;
-    token_type: string;
-    scope?: string;
-    expires_in: number;
-    refresh_token?: string;
-  };
+  return (await response.json()) as SpotifyTokenResponse;
 }
 
-export async function exchangeSpotifyCode(code: string) {
+export async function exchangeSpotifyCode(code: string): Promise<SpotifyTokens> {
   const { clientId, clientSecret, redirectUri } = getSpotifyConfig();
+
   const body = new URLSearchParams({
     grant_type: "authorization_code",
     code,
@@ -180,9 +243,7 @@ export async function exchangeSpotifyCode(code: string) {
   const response = await fetch(SPOTIFY_TOKEN_URL, {
     method: "POST",
     headers: {
-      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString(
-        "base64"
-      )}`,
+      Authorization: getBasicAuthHeader(clientId, clientSecret),
       "Content-Type": "application/x-www-form-urlencoded",
     },
     body: body.toString(),
@@ -190,17 +251,10 @@ export async function exchangeSpotifyCode(code: string) {
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Spotify token exchange failed: ${response.status} ${error}`);
+    throw new Error(await parseSpotifyError(response));
   }
 
-  const result = (await response.json()) as {
-    access_token: string;
-    token_type: string;
-    scope?: string;
-    expires_in: number;
-    refresh_token?: string;
-  };
+  const result = (await response.json()) as SpotifyTokenResponse;
 
   return {
     access_token: result.access_token,
@@ -208,38 +262,52 @@ export async function exchangeSpotifyCode(code: string) {
     scope: result.scope,
     expires_at: Date.now() + result.expires_in * 1000,
     refresh_token: result.refresh_token,
-  } satisfies SpotifyTokens;
+  };
 }
 
 export async function getSpotifyAccessToken() {
   const tokens = await getSpotifyTokens();
+
   if (!tokens) {
     return null;
   }
 
-  if (tokens.expires_at > Date.now() + 15_000) {
+  const stillValid =
+    tokens.expires_at > Date.now() + SPOTIFY_ACCESS_TOKEN_REFRESH_BUFFER_MS;
+
+  if (stillValid) {
     return tokens.access_token;
   }
 
   if (!tokens.refresh_token) {
+    await clearSpotifyTokens();
     return null;
   }
 
-  const refreshed = await refreshSpotifyToken(tokens.refresh_token);
-  const updated: SpotifyTokens = {
-    access_token: refreshed.access_token,
-    token_type: refreshed.token_type,
-    scope: refreshed.scope ?? tokens.scope,
-    expires_at: Date.now() + refreshed.expires_in * 1000,
-    refresh_token: refreshed.refresh_token ?? tokens.refresh_token,
-  };
+  try {
+    const refreshed = await refreshSpotifyToken(tokens.refresh_token);
 
-  await setSpotifyTokens(updated);
-  return updated.access_token;
+    const updatedTokens: SpotifyTokens = {
+      access_token: refreshed.access_token,
+      token_type: refreshed.token_type,
+      scope: refreshed.scope ?? tokens.scope,
+      expires_at: Date.now() + refreshed.expires_in * 1000,
+      refresh_token: refreshed.refresh_token ?? tokens.refresh_token,
+    };
+
+    await setSpotifyTokens(updatedTokens);
+
+    return updatedTokens.access_token;
+  } catch (error) {
+    console.error("Spotify token refresh failed:", error);
+    await clearSpotifyTokens();
+    return null;
+  }
 }
 
 export async function getSpotifyProfile(accessToken?: string) {
   const token = accessToken ?? (await getSpotifyAccessToken());
+
   if (!token) {
     return null;
   }
@@ -252,9 +320,8 @@ export async function getSpotifyProfile(accessToken?: string) {
   });
 
   if (!response.ok) {
-    const error = await response.text();
-    throw new Error(`Spotify profile fetch failed: ${response.status} ${error}`);
+    throw new Error(await parseSpotifyError(response));
   }
 
-  return (await response.json()) as unknown;
+  return (await response.json()) as SpotifyProfile;
 }

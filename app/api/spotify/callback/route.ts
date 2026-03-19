@@ -2,27 +2,58 @@ import { NextResponse } from "next/server";
 import {
   clearSpotifyState,
   exchangeSpotifyCode,
-  readSpotifyState,
   setSpotifyTokens,
+  readSpotifyState,
 } from "@/lib/spotify";
+import { getSession } from "@/lib/auth";
 
 export async function GET(request: Request) {
-  const { searchParams } = new URL(request.url);
-  const code = searchParams.get("code");
-  const state = searchParams.get("state");
+  const url = new URL(request.url);
+  const code = url.searchParams.get("code");
+  const state = url.searchParams.get("state");
+  const error = url.searchParams.get("error");
+
+  const session = await getSession();
+  if (!session) {
+    return NextResponse.redirect(new URL("/login", url));
+  }
+
+  if (error) {
+    await clearSpotifyState().catch(() => {});
+    return NextResponse.redirect(
+      new URL(`/mood?spotify_error=${encodeURIComponent(error)}`, url)
+    );
+  }
 
   if (!code || !state) {
-    return NextResponse.json({ error: "Missing code or state" }, { status: 400 });
+    await clearSpotifyState().catch(() => {});
+    return NextResponse.redirect(
+      new URL("/mood?spotify_error=missing_code_or_state", url)
+    );
   }
 
-  const storedState = await readSpotifyState();
-  if (!storedState || storedState !== state) {
-    return NextResponse.json({ error: "Invalid state" }, { status: 400 });
+  try {
+    const storedState = await readSpotifyState();
+
+    if (!storedState || storedState !== state) {
+      await clearSpotifyState().catch(() => {});
+      return NextResponse.redirect(
+        new URL("/mood?spotify_error=invalid_state", url)
+      );
+    }
+
+    const tokens = await exchangeSpotifyCode(code);
+
+    await setSpotifyTokens(tokens);
+    await clearSpotifyState();
+
+    return NextResponse.redirect(new URL("/mood", url));
+  } catch (err) {
+    console.error("Spotify callback failed:", err);
+    await clearSpotifyState().catch(() => {});
+
+    return NextResponse.redirect(
+      new URL("/mood?spotify_error=callback_failed", url)
+    );
   }
-
-  const tokens = await exchangeSpotifyCode(code);
-  await setSpotifyTokens(tokens);
-  await clearSpotifyState();
-
-  return NextResponse.redirect(new URL("/mood", request.url));
 }
