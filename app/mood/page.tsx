@@ -1,6 +1,8 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { clearSessionCookie, getSession } from "@/lib/auth";
+import { detectMoodKeyword } from "@/lib/gemini";
+import { insertMoodHistory } from "@/lib/history";
 import { getSpotifyTokens } from "@/lib/spotify";
 
 const fallbackEmoji = "🌿";
@@ -12,7 +14,54 @@ async function logout() {
   redirect("/login");
 }
 
-export default async function MoodPage() {
+async function saveMood(formData: FormData) {
+  "use server";
+
+  const session = await getSession();
+  if (!session) {
+    redirect("/login");
+  }
+
+  const moodText = String(formData.get("mood") || "").trim();
+
+  if (!moodText) {
+    redirect("/mood?error=empty");
+  }
+
+  if (moodText.length > 1000) {
+    redirect("/mood?error=too_long");
+  }
+
+  const moodKeyword = await detectMoodKeyword(moodText);
+
+  // For now, keep this empty until Spotify recommendations are wired in.
+  const recommendedTracks: Array<{
+    id: string;
+    name: string;
+    artist: string;
+    url: string;
+    image?: string | null;
+  }> = [];
+
+  await insertMoodHistory({
+    userId: session.id,
+    moodText,
+    moodKeyword,
+    recommendedTracks,
+  });
+
+  redirect(`/mood?saved=1&keyword=${encodeURIComponent(moodKeyword)}`);
+}
+
+export default async function MoodPage({
+  searchParams,
+}: {
+  searchParams?: {
+    saved?: string;
+    keyword?: string;
+    error?: string;
+  };
+}) {
   const session = await getSession();
   if (!session) {
     redirect("/login");
@@ -115,12 +164,32 @@ export default async function MoodPage() {
                   Status
                 </p>
                 <p className="mt-1 text-sm font-semibold">
-                  {isSpotifyConnected ? "Ready to recommend music" : "Connect Spotify to continue"}
+                  {isSpotifyConnected
+                    ? "Ready to recommend music"
+                    : "Connect Spotify to continue"}
                 </p>
               </div>
             </div>
 
-            <div className="mt-8">
+            {searchParams?.saved === "1" && searchParams?.keyword ? (
+              <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+                Mood saved. Detected feeling: <strong>{searchParams.keyword}</strong>
+              </div>
+            ) : null}
+
+            {searchParams?.error === "empty" ? (
+              <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                Please write something before saving your mood.
+              </div>
+            ) : null}
+
+            {searchParams?.error === "too_long" ? (
+              <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                Your mood note is too long.
+              </div>
+            ) : null}
+
+            <form action={saveMood} className="mt-8">
               <label
                 htmlFor="mood-input"
                 className="block text-xs font-semibold uppercase tracking-[0.2em]"
@@ -130,9 +199,12 @@ export default async function MoodPage() {
 
               <textarea
                 id="mood-input"
+                name="mood"
                 rows={7}
                 className="mt-3 w-full rounded-3xl border border-[color:var(--line)] bg-[color:var(--surface)] px-5 py-4 text-sm leading-6 outline-none transition placeholder:text-[color:var(--ink-soft)]/70 focus:border-[color:var(--emerald)] focus:ring-2 focus:ring-[color:var(--emerald)]/25"
                 placeholder="I feel calm but energized after a long walk. I want something uplifting, soft, and focused..."
+                maxLength={1000}
+                required
               />
 
               <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -142,20 +214,20 @@ export default async function MoodPage() {
 
                 <div className="flex gap-3">
                   <button
-                    type="button"
+                    type="reset"
                     className="h-11 rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface-strong)] px-5 text-sm font-semibold text-[color:var(--foreground)] transition hover:border-[color:var(--emerald)]"
                   >
                     Clear
                   </button>
                   <button
-                    type="button"
+                    type="submit"
                     className="h-11 rounded-2xl bg-[color:var(--emerald)] px-6 text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-[color:var(--emerald-dark)]"
                   >
                     Save mood
                   </button>
                 </div>
               </div>
-            </div>
+            </form>
           </section>
 
           <aside className="grid gap-6">
