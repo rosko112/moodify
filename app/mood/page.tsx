@@ -5,6 +5,7 @@ import { detectMoodKeyword } from "@/lib/gemini";
 import { insertMoodHistory } from "@/lib/history";
 import { getSpotifyTokens } from "@/lib/spotify";
 
+
 const fallbackEmoji = "🌿";
 
 async function logout() {
@@ -32,25 +33,29 @@ async function saveMood(formData: FormData) {
     redirect("/mood?error=too_long");
   }
 
-  const moodKeyword = await detectMoodKeyword(moodText);
+  try {
+    const moodKeyword = await detectMoodKeyword(moodText);
 
-  // For now, keep this empty until Spotify recommendations are wired in.
-  const recommendedTracks: Array<{
-    id: string;
-    name: string;
-    artist: string;
-    url: string;
-    image?: string | null;
-  }> = [];
+    const recommendedTracks: Array<{
+      id: string;
+      name: string;
+      artist: string;
+      url: string;
+      image?: string | null;
+    }> = [];
 
-  await insertMoodHistory({
-    userId: session.id,
-    moodText,
-    moodKeyword,
-    recommendedTracks,
-  });
+    await insertMoodHistory({
+      userId: session.id,
+      moodText,
+      moodKeyword,
+      recommendedTracks,
+    });
 
-  redirect(`/mood?saved=1&keyword=${encodeURIComponent(moodKeyword)}`);
+    redirect(`/mood?saved=1&keyword=${encodeURIComponent(moodKeyword)}`);
+  } catch (error) {
+    console.error("Failed to save mood:", error);
+    redirect("/mood?error=save_failed");
+  }
 }
 
 export default async function MoodPage({
