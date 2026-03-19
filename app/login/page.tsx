@@ -90,7 +90,7 @@ export default function LoginPage({ searchParams }: LoginPageProps) {
                 required
               />
             </div>
-            <button className="h-11 rounded-2xl bg-[color:var(--foreground)] text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-[color:var(--emerald-dark)]">
+            <button className="h-11 rounded-2xl bg-[color:var(--emerald)] text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-[color:var(--emerald-dark)]">
               Sign in
             </button>
           </form>
