@@ -17,7 +17,7 @@ export async function insertMoodHistory(params: {
   const { userId, moodText, moodKeyword, recommendedTracks } = params;
 
   await sql`
-    INSERT INTO history (user_id, mood_text, mood_keyword, recommended_tracks)
+    INSERT INTO user_history (user_id, mood_text, mood_keyword, recommended_tracks)
     VALUES (
       ${userId},
       ${moodText},
