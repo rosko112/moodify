@@ -2,7 +2,11 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { clearSessionCookie, getSession } from "@/lib/auth";
 import { detectMoodKeyword } from "@/lib/gemini";
-import { getMoodHistoryEntryById, insertMoodHistory } from "@/lib/history";
+import {
+  getLatestMoodHistoryEntryByUserId,
+  getMoodHistoryEntryById,
+  insertMoodHistory,
+} from "@/lib/history";
 import { getSpotifyTokens } from "@/lib/spotify";
 import { searchTracksByMood } from "@/lib/spotify-recommendation";
 
@@ -100,6 +104,10 @@ export default async function MoodPage({
       id: savedHistoryId,
       userId: session.id,
     });
+  }
+
+  if (searchParams?.saved === "1" && !savedEntry) {
+    savedEntry = await getLatestMoodHistoryEntryByUserId(session.id);
   }
 
   return (

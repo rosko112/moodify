@@ -20,10 +20,26 @@ type SpotifySearchTrackItem = {
   };
 };
 
+type SpotifyPlaylistItem = {
+  id: string;
+  name: string;
+};
+
+type SpotifyPlaylistTrackItem = {
+  track?: SpotifySearchTrackItem | null;
+};
+
 type SpotifySearchResponse = {
   tracks?: {
     items?: SpotifySearchTrackItem[];
   };
+  playlists?: {
+    items?: SpotifyPlaylistItem[];
+  };
+};
+
+type SpotifyPlaylistTracksResponse = {
+  items?: SpotifyPlaylistTrackItem[];
 };
 
 function shuffleArray<T>(items: T[]): T[] {
@@ -37,6 +53,94 @@ function shuffleArray<T>(items: T[]): T[] {
   return copy;
 }
 
+function mapTrack(track: SpotifySearchTrackItem): RecommendedTrack {
+  return {
+    id: track.id,
+    name: track.name,
+    artist: track.artists.map((artist) => artist.name).join(", "),
+    url: track.external_urls?.spotify ?? "#",
+    image: track.album?.images?.[0]?.url ?? null,
+  };
+}
+
+function dedupeTracks(items: RecommendedTrack[]): RecommendedTrack[] {
+  const unique = new Map<string, RecommendedTrack>();
+
+  for (const track of items) {
+    if (!unique.has(track.id)) {
+      unique.set(track.id, track);
+    }
+  }
+
+  return [...unique.values()];
+}
+
+async function spotifyFetchJson<T>(url: string, accessToken: string): Promise<T> {
+  const response = await fetch(url, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Spotify request failed: ${response.status} ${errorText}`);
+  }
+
+  return (await response.json()) as T;
+}
+
+async function searchPlaylistsByMood(
+  moodKeyword: string,
+  accessToken: string,
+  limit = 6
+): Promise<SpotifyPlaylistItem[]> {
+  const params = new URLSearchParams({
+    q: moodKeyword,
+    type: "playlist",
+    limit: String(limit),
+  });
+
+  const data = await spotifyFetchJson<SpotifySearchResponse>(
+    `https://api.spotify.com/v1/search?${params.toString()}`,
+    accessToken
+  );
+
+  return data.playlists?.items ?? [];
+}
+
+async function fetchTracksFromPlaylist(
+  playlistId: string,
+  accessToken: string,
+  limit = 20
+): Promise<RecommendedTrack[]> {
+  const params = new URLSearchParams({
+    limit: String(limit),
+  });
+
+  const data = await spotifyFetchJson<SpotifyPlaylistTracksResponse>(
+    `https://api.spotify.com/v1/playlists/${playlistId}/tracks?${params.toString()}`,
+    accessToken
+  );
+
+  const tracks = (data.items ?? [])
+    .map((item) => item.track)
+    .filter(
+      (track): track is SpotifySearchTrackItem =>
+        Boolean(
+          track &&
+            track.id &&
+            track.name &&
+            Array.isArray(track.artists) &&
+            track.artists.length > 0
+        )
+    )
+    .map(mapTrack);
+
+  return tracks;
+}
+
 export async function searchTracksByMood(
   moodKeyword: string,
   limit = 20
@@ -47,36 +151,30 @@ export async function searchTracksByMood(
     throw new Error("Spotify is not connected");
   }
 
-  const params = new URLSearchParams({
+  const playlists = await searchPlaylistsByMood(moodKeyword, accessToken, 8);
+  const playlistsToUse = playlists.slice(0, 4);
+
+  const playlistTrackGroups = await Promise.all(
+    playlistsToUse.map((playlist) => fetchTracksFromPlaylist(playlist.id, accessToken, 20))
+  );
+
+  const playlistTracks = dedupeTracks(playlistTrackGroups.flat());
+
+  if (playlistTracks.length > 0) {
+    return shuffleArray(playlistTracks).slice(0, 6);
+  }
+
+  const trackParams = new URLSearchParams({
     q: moodKeyword,
     type: "track",
     limit: String(limit),
   });
 
-  const response = await fetch(
-    `https://api.spotify.com/v1/search?${params.toString()}`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-      },
-      cache: "no-store",
-    }
+  const trackSearchData = await spotifyFetchJson<SpotifySearchResponse>(
+    `https://api.spotify.com/v1/search?${trackParams.toString()}`,
+    accessToken
   );
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Spotify track search failed: ${response.status} ${errorText}`);
-  }
-
-  const data = (await response.json()) as SpotifySearchResponse;
-
-  const tracks: RecommendedTrack[] = (data.tracks?.items ?? []).map((track) => ({
-    id: track.id,
-    name: track.name,
-    artist: track.artists.map((artist) => artist.name).join(", "),
-    url: track.external_urls?.spotify ?? "#",
-    image: track.album?.images?.[0]?.url ?? null,
-  }));
-
+  const tracks = (trackSearchData.tracks?.items ?? []).map(mapTrack);
   return shuffleArray(tracks).slice(0, 6);
 }

@@ -125,6 +125,31 @@ export async function getMoodHistoryByUserId(userId: number): Promise<MoodHistor
   return rows.map(mapRowToMoodHistoryEntry);
 }
 
+export async function getLatestMoodHistoryEntryByUserId(
+  userId: number
+): Promise<MoodHistoryEntry | null> {
+  const rows = (await sql`
+    SELECT
+      id,
+      user_id,
+      mood_text,
+      mood_keyword,
+      recommended_tracks,
+      created_at
+    FROM user_history
+    WHERE user_id = ${userId}
+    ORDER BY created_at DESC
+    LIMIT 1
+  `) as RawMoodHistoryRow[];
+
+  const row = rows[0];
+  if (!row) {
+    return null;
+  }
+
+  return mapRowToMoodHistoryEntry(row);
+}
+
 export async function getMoodHistoryEntryById(params: {
   id: number;
   userId: number;
