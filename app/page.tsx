@@ -21,7 +21,7 @@ export default function Home() {
               Moodify
             </p>
             <h1 className="font-display mt-4 text-4xl font-semibold leading-tight md:text-5xl">
-              A calm, green space to sign in or start fresh.
+              Track your mood. Find your next song.
             </h1>
             <p className="mt-4 text-base text-[color:var(--ink-soft)] md:text-lg">
               Keep your focus on the vibes. Log in to your dashboard or create an
@@ -90,7 +90,7 @@ export default function Home() {
               </p>
               <Link
                 href="/login"
-                className="mt-6 inline-flex h-11 items-center justify-center rounded-2xl bg-[color:var(--foreground)] px-6 text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-[color:var(--emerald-dark)]"
+                className="mt-6 inline-flex h-11 items-center justify-center rounded-2xl bg-[color:var(--emerald)] px-6 text-sm font-semibold uppercase tracking-[0.2em] text-white transition hover:bg-[color:var(--emerald-dark)]"
               >
                 Go to login
               </Link>

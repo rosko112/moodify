@@ -2,8 +2,9 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { clearSessionCookie, getSession } from "@/lib/auth";
 import { detectMoodKeyword } from "@/lib/gemini";
-import { insertMoodHistory } from "@/lib/history";
+import { getMoodHistoryEntryById, insertMoodHistory } from "@/lib/history";
 import { getSpotifyTokens } from "@/lib/spotify";
+import { searchTracksByMood } from "@/lib/spotify-recommendation";
 
 
 const fallbackEmoji = "🌿";
@@ -36,7 +37,7 @@ async function saveMood(formData: FormData) {
   try {
     const moodKeyword = await detectMoodKeyword(moodText);
 
-    const recommendedTracks: Array<{
+    let recommendedTracks: Array<{
       id: string;
       name: string;
       artist: string;
@@ -44,14 +45,22 @@ async function saveMood(formData: FormData) {
       image?: string | null;
     }> = [];
 
-    await insertMoodHistory({
+    try {
+      recommendedTracks = await searchTracksByMood(moodKeyword);
+    } catch (spotifyError) {
+      console.error("Failed to fetch Spotify recommendations:", spotifyError);
+    }
+
+    const historyId = await insertMoodHistory({
       userId: session.id,
       moodText,
       moodKeyword,
       recommendedTracks,
     });
 
-    redirect(`/mood?saved=1&keyword=${encodeURIComponent(moodKeyword)}`);
+    redirect(
+      `/mood?saved=1&keyword=${encodeURIComponent(moodKeyword)}&historyId=${historyId}`
+    );
   } catch (error) {
     console.error("Failed to save mood:", error);
     redirect("/mood?error=save_failed");
@@ -64,6 +73,7 @@ export default async function MoodPage({
   searchParams?: {
     saved?: string;
     keyword?: string;
+    historyId?: string;
     error?: string;
   };
 }) {
@@ -79,6 +89,18 @@ export default async function MoodPage({
     name: session.name,
     emoji: session.emoji || fallbackEmoji,
   };
+
+  let savedEntry = null;
+  const savedHistoryId = Number.parseInt(searchParams?.historyId ?? "", 10);
+  const shouldLoadSavedEntry =
+    searchParams?.saved === "1" && Number.isFinite(savedHistoryId) && savedHistoryId > 0;
+
+  if (shouldLoadSavedEntry) {
+    savedEntry = await getMoodHistoryEntryById({
+      id: savedHistoryId,
+      userId: session.id,
+    });
+  }
 
   return (
     <div className="relative min-h-screen overflow-hidden bg-[color:var(--background)] text-[color:var(--foreground)]">
@@ -179,6 +201,40 @@ export default async function MoodPage({
             {searchParams?.saved === "1" && searchParams?.keyword ? (
               <div className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
                 Mood saved. Detected feeling: <strong>{searchParams.keyword}</strong>
+              </div>
+            ) : null}
+
+            {savedEntry ? (
+              <div className="mt-4 rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface-strong)] p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-[color:var(--emerald-dark)]">
+                  Recommended songs for this mood
+                </p>
+
+                {savedEntry.recommendedTracks.length === 0 ? (
+                  <p className="mt-2 text-sm text-[color:var(--ink-soft)]">
+                    No Spotify recommendations were returned for this mood.
+                  </p>
+                ) : (
+                  <ul className="mt-3 grid gap-2">
+                    {savedEntry.recommendedTracks.map((track) => (
+                      <li
+                        key={track.id}
+                        className="rounded-2xl border border-[color:var(--line)] bg-[color:var(--surface)] p-3 text-sm"
+                      >
+                        <p className="font-semibold">{track.name}</p>
+                        <p className="text-[color:var(--ink-soft)]">{track.artist}</p>
+                        <a
+                          href={track.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="mt-1 inline-block text-xs font-semibold uppercase tracking-[0.15em] text-[color:var(--emerald-dark)] hover:text-[color:var(--emerald)]"
+                        >
+                          Open in Spotify
+                        </a>
+                      </li>
+                    ))}
+                  </ul>
+                )}
               </div>
             ) : null}
 
